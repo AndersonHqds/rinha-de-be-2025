@@ -6,10 +6,10 @@ import { AbstractPaymentRepository } from "./repository/payment.repository.abstr
 import { HttpModule } from "@nestjs/axios";
 import { PaymentController } from "./controller/payment.controller";
 import { RabbitProducerService } from "./messaging/rabbit.producer";
-import { PostgresService } from "../database/postgres";
+import { DatabaseModule } from "../database/database.module";
 
 @Module({
-    imports: [HttpModule],
+    imports: [HttpModule, DatabaseModule],
     controllers: [PaymentController],
     providers: [{
         provide: AbstractPaymentService,
@@ -17,7 +17,7 @@ import { PostgresService } from "../database/postgres";
     }, {
         provide: AbstractPaymentRepository,
         useClass: PaymentRepository,
-    }, RabbitProducerService, PostgresService],
+    }, RabbitProducerService],
     exports: [AbstractPaymentService, AbstractPaymentRepository],
 })
 export default class PaymentModule {}

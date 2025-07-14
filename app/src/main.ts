@@ -9,10 +9,12 @@ async function bootstrap() {
     transport: Transport.RMQ,
     options: {
       urls: [process.env.RABBITMQ_URL],
-      queue: 'payments',
+      queue: 'create_payment',
       queueOptions: {
-        durable: false,
+        durable: true,
       },
+      noAck: false,
+      prefetchCount: 1,
     },
   });
   app.startAllMicroservices();

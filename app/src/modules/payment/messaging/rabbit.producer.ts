@@ -10,8 +10,8 @@ export class RabbitProducerService {
       transport: Transport.RMQ,
       options: {
         urls: [process.env.RABBITMQ_URL],
-        queue: 'payments',
-        queueOptions: { durable: false },
+        queue: 'create_payment',
+        queueOptions: { durable: true },
       },
     });
   }

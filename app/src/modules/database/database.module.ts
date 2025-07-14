@@ -1,8 +1,12 @@
 import { Module } from "@nestjs/common";
-import { PostgresService } from "./postgres";
+import { PostgresAdapter } from "./postgres";
+import Connection from "./connection";
 
 @Module({
-    providers: [PostgresService],
-    exports: [PostgresService],
+    providers: [ {
+        provide: Connection,
+        useClass: PostgresAdapter,
+    }],
+    exports: [Connection],
 })
 export class DatabaseModule {}

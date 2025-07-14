@@ -1,8 +1,9 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { Client } from 'pg';
+import Connection from './connection';
 
 @Injectable()
-export class PostgresService implements OnModuleInit, OnModuleDestroy {
+export class PostgresAdapter implements OnModuleInit, OnModuleDestroy, Connection {
   private client: Client;
 
   async onModuleInit() {
