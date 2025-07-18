@@ -2,7 +2,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 export let options = {
-  vus: 100, // virtual users simultâneos
+  vus: 50, // virtual users simultâneos
   duration: '30s', // por 30 segundos
 };
 

@@ -7,6 +7,7 @@ import { lastValueFrom } from 'rxjs';
 import { ConfigService } from "@nestjs/config";
 import * as CircuitBreaker from 'opossum';
 import Connection from "src/modules/database/connection";
+import { PaymentsSummaryResponse } from "../model/responses";
 
 @Injectable()
 export default class PaymentRepository implements AbstractPaymentRepository {
@@ -15,7 +16,7 @@ export default class PaymentRepository implements AbstractPaymentRepository {
 
     private breaker: CircuitBreaker<any, any>;
 
-    constructor(private readonly httpService: HttpService, private readonly configService: ConfigService, private readonly postgresService: Connection) {
+    constructor(private readonly httpService: HttpService, private readonly configService: ConfigService, private readonly postgresAdapter: Connection) {
         this.paymentProcessor = UrlBuilder.build(this.configService.get('PAYMENT_PROCESSOR_URL'));
         this.paymentProcessorFallback = UrlBuilder.build(this.configService.get('PAYMENT_PROCESSOR_FALLBACK_URL'));
 
@@ -29,11 +30,51 @@ export default class PaymentRepository implements AbstractPaymentRepository {
         this.breaker.on('halfOpen', () => console.log('Circuit breaker HALF-OPEN'));
         this.breaker.on('close', () => console.log('Circuit breaker CLOSED'));
     }
+    
+    async getPaymentsSummary(from: Date, to: Date): Promise<PaymentsSummaryResponse> {
+        const conditions: string[] = [];
+        const values: any[] = [];
+
+        if (from) {
+            conditions.push(`created_at >= $${values.length + 1}`);
+            values.push(from);
+        }
+
+        if (to) {
+            conditions.push(`created_at <= $${values.length + 1}`);
+            values.push(to);
+        }
+        const whereClause = conditions.length > 1 ? `${conditions.join(' AND ')} AND` : '';
+        const resultPrimary = await this.postgresAdapter.query(`SELECT correlation_id, amount, totalRequests, created_at, payment_processor FROM payments WHERE ${whereClause} payment_processor = 'primary'`, values)
+        const resultFallback = await this.postgresAdapter.query(`SELECT correlation_id, amount, totalRequests, created_at, payment_processor FROM payments WHERE ${whereClause} payment_processor = 'fallback'`, values)
+        console.log(resultPrimary);
+        console.log(resultFallback);
+        return {
+            default: resultPrimary.reduce((acc, row) => {
+                return ({
+                    totalRequests: resultPrimary.length,
+                    totalAmount: acc.totalAmount + Number(row.amount),
+                })
+            }, {
+                totalRequests: 0,
+                totalAmount: 0,
+            }),
+            fallback: resultFallback.reduce((acc, row) => {
+                return ({
+                    totalRequests: resultFallback.length,
+                    totalAmount: acc.totalAmount + Number(row.amount),
+                })
+            }, {
+                totalRequests: 0,
+                totalAmount: 0,
+            }),
+        }
+    }
 
     private async callPrimaryProcessor(payment): Promise<void> {
         const result = await lastValueFrom(this.httpService.post(this.paymentProcessor.url('payments'), payment));
         if (result.status === 200) {
-            await this.savePayment(payment);
+            await this.savePayment({ ...payment, paymentProcessor: 'primary' });
         }
     }
 
@@ -44,13 +85,15 @@ export default class PaymentRepository implements AbstractPaymentRepository {
             throw error;
         });
         if (result.status === 200) {
-            await this.savePayment(payment);
+            await this.savePayment({ ...payment, paymentProcessor: 'fallback' });
         }
     }
 
-    private async savePayment(payment: Payment & { createdAt: Date }) {
-        await this.postgresService.query('INSERT INTO payments (correlation_id, amount, created_at, payment_processor) VALUES ($1, $2, $3, $4)', [payment.correlationId, payment.amount, payment.createdAt, 'primary']);
+    private async savePayment(payment: Payment & { createdAt: Date; paymentProcessor: string }) {
+        await this.postgresAdapter.query('INSERT INTO payments (correlation_id, amount, created_at, payment_processor) VALUES ($1, $2, $3, $4)', 
+            [payment.correlationId, payment.amount, payment.createdAt, payment.paymentProcessor]);
     }
+
 
     async createPayment(payment: Payment) {
         try {

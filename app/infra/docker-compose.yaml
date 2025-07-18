@@ -22,3 +22,33 @@ services:
       - RABBITMQ_DEFAULT_PASS=admin
     volumes:
       - ./rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf
+
+  backend1:
+    build:
+      context: ../app
+      dockerfile: Dockerfile
+    ports:
+      - 3000:3000
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  backend2:
+    build:
+      context: ../app
+      dockerfile: Dockerfile
+    ports:
+      - 3001:3001
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - 9999:9999
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - postgres
+      - rabbitmq
