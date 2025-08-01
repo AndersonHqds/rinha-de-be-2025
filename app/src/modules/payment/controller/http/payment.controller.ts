@@ -16,4 +16,9 @@ export class PaymentController {
     getPaymentSummary(@Query('from') from: Date, @Query('to') to: Date) {
         return this.paymentService.getPaymentsSummary(from, to);
     }
+
+    @Post('/purge-payments')
+    purgePayments() {
+        return this.paymentService.purgePayments();
+    }
 }

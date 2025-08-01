@@ -23,12 +23,21 @@ export default class PaymentRepository implements AbstractPaymentRepository {
         this.breaker = new CircuitBreaker(this.callPrimaryProcessor.bind(this), {
             timeout: 5000, // quanto tempo esperar cada chamada
             errorThresholdPercentage: 50, // se 50% das chamadas falharem, abre o circuito
-            resetTimeout: 10000, // depois de 10s, tenta fechar o circuito
+            resetTimeout: 5000, // depois de 10s, tenta fechar o circuito
         });
 
         this.breaker.on('open', () => console.log('Circuit breaker OPEN'));
         this.breaker.on('halfOpen', () => console.log('Circuit breaker HALF-OPEN'));
         this.breaker.on('close', () => console.log('Circuit breaker CLOSED'));
+    }
+
+    async findPaymentByCorrelationId(correlationId: string) {
+        const result = await this.postgresAdapter.query(`SELECT * FROM payments WHERE correlation_id = $1`, [correlationId]);
+        return result.length > 0 ? result[0] : null;
+    }
+
+    async purgePayments(): Promise<void> {
+        await this.postgresAdapter.query('DELETE FROM payments');
     }
     
     async getPaymentsSummary(from: Date, to: Date): Promise<PaymentsSummaryResponse> {
@@ -45,43 +54,42 @@ export default class PaymentRepository implements AbstractPaymentRepository {
             values.push(to);
         }
         const whereClause = conditions.length > 1 ? `${conditions.join(' AND ')} AND` : '';
-        const resultPrimary = await this.postgresAdapter.query(`SELECT correlation_id, amount, totalRequests, created_at, payment_processor FROM payments WHERE ${whereClause} payment_processor = 'primary'`, values)
-        const resultFallback = await this.postgresAdapter.query(`SELECT correlation_id, amount, totalRequests, created_at, payment_processor FROM payments WHERE ${whereClause} payment_processor = 'fallback'`, values)
-        console.log(resultPrimary);
-        console.log(resultFallback);
+        const resultPrimary = await this.postgresAdapter.query(`SELECT count(correlation_id) as quantity, sum(amount) as totalAmount FROM payments WHERE ${whereClause} payment_processor = 'primary'`, values)
+        const resultFallback = await this.postgresAdapter.query(`SELECT count(correlation_id) as quantity, sum(amount) as totalAmount FROM payments WHERE ${whereClause} payment_processor = 'fallback'`, values)
+        
         return {
-            default: resultPrimary.reduce((acc, row) => {
-                return ({
-                    totalRequests: resultPrimary.length,
-                    totalAmount: acc.totalAmount + Number(row.amount),
-                })
-            }, {
-                totalRequests: 0,
-                totalAmount: 0,
-            }),
-            fallback: resultFallback.reduce((acc, row) => {
-                return ({
-                    totalRequests: resultFallback.length,
-                    totalAmount: acc.totalAmount + Number(row.amount),
-                })
-            }, {
-                totalRequests: 0,
-                totalAmount: 0,
-            }),
+            default: {
+                totalRequests: resultPrimary[0].quantity,
+                totalAmount: parseFloat(resultPrimary[0].totalAmount.toFixed(2)),
+            },
+            fallback: {
+                totalRequests: resultFallback[0].quantity,
+                totalAmount: parseFloat(resultFallback[0].totalAmount.toFixed(2)),
+            },
         }
     }
 
     private async callPrimaryProcessor(payment): Promise<void> {
-        const result = await lastValueFrom(this.httpService.post(this.paymentProcessor.url('payments'), payment));
+        const { createdAt: requestedAt, ...rest } = payment;
+        const result = await lastValueFrom(this.httpService.post(this.paymentProcessor.url('payments'), {
+            ...rest,
+            requestedAt,
+        })).catch(error => {
+            console.log(`[Primary] Error detail`, error.response.data);
+            throw error;
+        });
         if (result.status === 200) {
             await this.savePayment({ ...payment, paymentProcessor: 'primary' });
         }
     }
 
     private async callFallbackProcessor(payment): Promise<void> {
-        console.log('Calling fallback payment processor');
-        const result = await lastValueFrom(this.httpService.post(this.paymentProcessorFallback.url('payments'), payment)).catch(error => {
-            console.log(`Error detail: ${error.response.data}`);
+        const { createdAt: requestedAt, ...rest } = payment;
+        const result = await lastValueFrom(this.httpService.post(this.paymentProcessorFallback.url('payments'), {
+            ...rest,
+            requestedAt
+        })).catch(error => {
+            console.log(`[Fallback] Error detail`, error.response.data);
             throw error;
         });
         if (result.status === 200) {

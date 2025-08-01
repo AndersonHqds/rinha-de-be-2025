@@ -18,6 +18,12 @@ async function bootstrap() {
     },
   });
   app.startAllMicroservices();
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled rejection', reason);
+  });
   await app.listen(3000);
 }
 bootstrap();
